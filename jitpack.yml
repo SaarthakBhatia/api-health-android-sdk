@@ -1,0 +1,8 @@
+jdk:
+  - openjdk17
+
+before_install:
+  - chmod +x mvnw
+
+install:
+  - ./mvnw -DskipTests install
