@@ -28,13 +28,11 @@ Add the SDK to the application module:
 
 ```kotlin
 dependencies {
-    implementation("com.github.SaarthakBhatia:api-health-android-sdk:0.5.0")
+    implementation("com.github.SaarthakBhatia:api-health-android-sdk:0.6.0")
 }
 ```
 
-JitPack builds immutable releases directly from this repository's Git tags. No GitHub package token or local Maven installation is required.
-
-## Install into Maven Local for SDK development
+## Install into Maven Local for development
 
 From this repository:
 
@@ -42,7 +40,7 @@ From this repository:
 .\mvnw.cmd install
 ```
 
-Add `mavenLocal()` to the Android repositories and use `com.apihealth:api-health-android:0.5.0`. This is only intended for testing unpublished SDK changes.
+Add `mavenLocal()` to the Android repositories and use `com.apihealth:api-health-android:0.6.0` while testing unpublished changes.
 
 ## Retrofit integration
 
@@ -66,6 +64,7 @@ ApiHealth.install(
         environment = "production",
         appVersion = BuildConfig.VERSION_NAME,
         deviceModel = Build.MODEL,
+        deviceManufacturer = Build.MANUFACTURER,
         osVersion = Build.VERSION.RELEASE,
         captureNetworkFailures = true,
         captureSuccessfulResponses = true,
@@ -87,7 +86,7 @@ val retrofit = Retrofit.Builder()
 
 HTTP `4xx`/`5xx` responses and timeout, DNS, SSL, connection, cancellation, and other I/O failures are reported by default. Successful `2xx`/`3xx` reporting is opt-in. Use `successSampleRate = 1.0` when every call must appear, or lower it deliberately to control high-volume storage.
 
-Version 0.5.0 automatically gives every captured event an anonymous session ID. The ID rotates after 30 minutes without captured activity, or immediately when `ApiHealth.startNewSession()` is called. This enables affected-session counts and auto-discovered API flows without a login, user ID, or manual journey calls. Set `automaticSessionTracking = false` only if your application supplies its own session ID.
+Version 0.6.0 captures the configured device manufacturer alongside its model and automatically gives every captured event an anonymous session ID. The ID rotates after 30 minutes without captured activity, or immediately when `ApiHealth.startNewSession()` is called. This enables affected-session counts and auto-discovered API flows without a login, user ID, or manual journey calls. Set `automaticSessionTracking = false` only if your application supplies its own session ID.
 
 The SDK batches up to 20 events into one request, retries transient `408`, `429`, and `5xx` failures, and assigns every event an idempotency ID so a retry cannot create a duplicate. A shared reporter services multiple monitored OkHttp clients without creating a delivery thread per client. The default queue holds 2,000 events and flushes every 1.5 seconds. `deliveryListener`, `ApiHealth.pendingEventCount()`, and `ApiHealth.flush()` make delivery state observable instead of silently hiding pressure or drops.
 

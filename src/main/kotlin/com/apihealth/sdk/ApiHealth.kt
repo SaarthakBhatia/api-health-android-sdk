@@ -6,7 +6,7 @@ import java.util.concurrent.atomic.AtomicReference
 import okhttp3.Request
 
 object ApiHealth {
-    const val SDK_VERSION = "0.5.0"
+    const val SDK_VERSION = "0.6.0"
 
     private val reporters = ConcurrentHashMap<ReporterKey, EventReporter>()
     private val sharedContext = AtomicReference(ApiHealthEventContext())

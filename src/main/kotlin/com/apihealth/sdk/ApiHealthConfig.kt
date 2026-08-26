@@ -9,6 +9,7 @@ data class ApiHealthConfig(
     val environment: String,
     val appVersion: String? = null,
     val deviceModel: String? = null,
+    val deviceManufacturer: String? = null,
     val osVersion: String? = null,
     val initialContext: ApiHealthEventContext = ApiHealthEventContext(),
     val contextProvider: (() -> ApiHealthEventContext?)? = null,

@@ -25,7 +25,7 @@ class ApiHealthTest {
 
     @Test
     fun `public SDK version matches the Maven release`() {
-        assertEquals("0.5.0", ApiHealth.SDK_VERSION)
+        assertEquals("0.6.0", ApiHealth.SDK_VERSION)
     }
 
     @Test
@@ -87,6 +87,28 @@ class ApiHealthTest {
         assertEquals(204, event.statusCode)
         assertNull(event.failureType)
         assertTrue("\"eventType\":\"HTTP_SUCCESS\"" in event.toJson())
+    }
+
+    @Test
+    fun `device manufacturer is included with the model`() {
+        val request = Request.Builder().url("https://service.example/profile").build()
+        val response = Response.Builder()
+            .request(request)
+            .protocol(Protocol.HTTP_1_1)
+            .code(200)
+            .message("OK")
+            .build()
+
+        val event = EventFactory.createHttpResponse(
+            request = request,
+            response = response,
+            durationMs = 25,
+            occurredAt = "2026-08-26T12:00:00.000Z",
+            config = testConfig().copy(deviceManufacturer = "OPPO", deviceModel = "CPH2599"),
+        )
+
+        assertTrue("\"deviceManufacturer\":\"OPPO\"" in event.toJson())
+        assertTrue("\"deviceModel\":\"CPH2599\"" in event.toJson())
     }
 
     @Test
@@ -263,6 +285,7 @@ class ApiHealthTest {
         responseBody = null,
         appVersion = "1",
         deviceModel = "test",
+        deviceManufacturer = "Test Devices",
         osVersion = "test",
         sdkVersion = ApiHealth.SDK_VERSION,
         requestBodyTruncated = false,

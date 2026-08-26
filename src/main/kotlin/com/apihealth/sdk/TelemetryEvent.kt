@@ -26,6 +26,7 @@ internal data class TelemetryEvent(
     val responseBody: String?,
     val appVersion: String?,
     val deviceModel: String?,
+    val deviceManufacturer: String?,
     val osVersion: String?,
     val sdkVersion: String,
     val anonymousUserId: String? = null,
@@ -61,6 +62,7 @@ internal data class TelemetryEvent(
         responseBody?.let { put("responseBody", it) }
         appVersion?.let { put("appVersion", it) }
         deviceModel?.let { put("deviceModel", it) }
+        deviceManufacturer?.let { put("deviceManufacturer", it) }
         osVersion?.let { put("osVersion", it) }
         put("sdkVersion", sdkVersion)
         anonymousUserId?.let { put("anonymousUserId", it) }
