@@ -1,19 +1,27 @@
 package com.apihealth.sdk
 
+import java.io.ByteArrayInputStream
 import java.net.ConnectException
+import java.net.InetSocketAddress
 import java.net.SocketException
 import java.net.SocketTimeoutException
 import java.net.UnknownHostException
 import java.math.BigDecimal
+import java.nio.file.Files
+import java.util.UUID
 import javax.net.ssl.SSLException
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicInteger
+import java.util.zip.GZIPInputStream
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertFailsWith
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 import okhttp3.OkHttpClient
+import okhttp3.Call
+import okhttp3.EventListener
 import okhttp3.Protocol
 import okhttp3.Request
 import okhttp3.Response
@@ -25,7 +33,7 @@ class ApiHealthTest {
 
     @Test
     fun `public SDK version matches the Maven release`() {
-        assertEquals("0.6.0", ApiHealth.SDK_VERSION)
+        assertEquals("0.7.0", ApiHealth.SDK_VERSION)
     }
 
     @Test
@@ -43,6 +51,52 @@ class ApiHealthTest {
         ApiHealth.install(builder, testConfig())
         ApiHealth.install(builder, testConfig())
         assertEquals(1, builder.interceptors().size)
+    }
+
+    @Test
+    fun `install preserves the application event listener`() {
+        MockWebServer().use { server ->
+            server.start()
+            server.enqueue(MockResponse(code = 200, body = "response"))
+            server.enqueue(MockResponse(code = 200, body = "{\"accepted\":1}"))
+            val starts = AtomicInteger()
+            val delivered = CountDownLatch(1)
+            val builder = OkHttpClient.Builder().eventListenerFactory {
+                object : EventListener() {
+                    override fun callStart(call: Call) {
+                        starts.incrementAndGet()
+                    }
+                }
+            }
+            ApiHealth.install(
+                builder,
+                testConfig().copy(
+                    endpointUrl = server.url("/api/v1/events").toString(),
+                    appId = "listener-${UUID.randomUUID()}",
+                    captureSuccessfulResponses = true,
+                    batchSize = 1,
+                    gzipBatches = false,
+                    deliveryListener = { report ->
+                        if (report.status == ApiHealthDeliveryStatus.DELIVERED) delivered.countDown()
+                    },
+                ),
+            )
+
+            builder.build().newCall(Request.Builder().url(server.url("/health")).build()).execute().use {
+                assertEquals("response", it.body.string())
+            }
+
+            assertTrue(delivered.await(5, TimeUnit.SECONDS))
+            assertEquals(1, starts.get())
+            assertEquals("/health", server.takeRequest(5, TimeUnit.SECONDS)?.url?.encodedPath)
+            val telemetry = server.takeRequest(5, TimeUnit.SECONDS)?.body?.utf8().orEmpty()
+            assertTrue("\"callId\":" in telemetry)
+            assertTrue("\"attemptNumber\":" in telemetry)
+            assertTrue("\"requestWriteMs\":" in telemetry)
+            assertTrue("\"ttfbMs\":" in telemetry)
+            assertTrue("\"responseReadMs\":" in telemetry)
+            assertTrue("\"reusedConnection\":false" in telemetry)
+        }
     }
 
     @Test
@@ -129,6 +183,8 @@ class ApiHealthTest {
                 requestBuilder,
                 ApiHealthEventContext(
                     correlationId = "order-123",
+                    callId = "checkout-attempts-123",
+                    attemptNumber = 2,
                     businessValue = BigDecimal("499.00"),
                     businessCurrency = "INR",
                 ),
@@ -159,6 +215,8 @@ class ApiHealthTest {
             assertTrue("\"carrier\":\"Airtel\"" in json)
             assertTrue("\"journeyName\":\"Checkout\"" in json)
             assertTrue("\"correlationId\":\"order-123\"" in json)
+            assertTrue("\"callId\":\"checkout-attempts-123\"" in json)
+            assertTrue("\"attemptNumber\":2" in json)
             assertTrue("\"businessValue\":499.00" in json)
             assertTrue("\"businessCurrency\":\"INR\"" in json)
         } finally {
@@ -242,6 +300,11 @@ class ApiHealthTest {
     }
 
     @Test
+    fun `adaptive sampling is opt in so full capture remains exact`() {
+        assertFalse(testConfig().adaptiveSampling)
+    }
+
+    @Test
     fun `reporter batches events and exposes delivery diagnostics`() {
         MockWebServer().use { server ->
             server.start()
@@ -252,6 +315,7 @@ class ApiHealthTest {
                     endpointUrl = server.url("/api/v1/events").toString(),
                     batchSize = 2,
                     flushIntervalMs = 30_000,
+                    gzipBatches = false,
                     deliveryListener = { report ->
                         if (report.status == ApiHealthDeliveryStatus.DELIVERED) delivered.countDown()
                     },
@@ -264,10 +328,194 @@ class ApiHealthTest {
             val request = server.takeRequest(5, TimeUnit.SECONDS)
             assertEquals("/api/v1/events/batch", request?.url?.encodedPath)
             val body = request?.body?.utf8().orEmpty()
-            assertTrue(body.startsWith("{\"events\":["))
+            assertTrue(body.startsWith("{\"batchId\":"))
+            assertTrue("\"sentAt\":" in body)
+            assertTrue("\"droppedSinceLastBatch\":0" in body)
+            assertTrue("\"events\":[" in body)
             assertEquals(2, "\"eventId\"".toRegex().findAll(body).count())
             assertEquals(0, reporter.pendingEventCount())
         }
+    }
+
+    @Test
+    fun `reporter gzips batches and reports wire cost`() {
+        MockWebServer().use { server ->
+            server.start()
+            server.enqueue(MockResponse(code = 200, body = "{\"accepted\":2}"))
+            val delivered = CountDownLatch(1)
+            var deliveryReport: ApiHealthDeliveryReport? = null
+            val reporter = EventReporter(
+                testConfig().copy(
+                    endpointUrl = server.url("/api/v1/events").toString(),
+                    batchSize = 2,
+                    flushIntervalMs = 30_000,
+                    gzipBatches = true,
+                    gzipMinimumBytes = 0,
+                    deliveryListener = { report ->
+                        if (report.status == ApiHealthDeliveryStatus.DELIVERED) {
+                            deliveryReport = report
+                            delivered.countDown()
+                        }
+                    },
+                ),
+            )
+            reporter.enqueue(testEvent(200))
+            reporter.enqueue(testEvent(201))
+
+            assertTrue(delivered.await(5, TimeUnit.SECONDS))
+            val request = server.takeRequest(5, TimeUnit.SECONDS)
+            assertEquals("gzip", request?.headers?.get("Content-Encoding"))
+            val body = GZIPInputStream(ByteArrayInputStream(request!!.body!!.toByteArray()))
+                .bufferedReader()
+                .use { it.readText() }
+            assertEquals(2, "\"eventId\"".toRegex().findAll(body).count())
+            val report = checkNotNull(deliveryReport)
+            assertTrue(report.payloadBytes < report.uncompressedPayloadBytes)
+            assertEquals(1, reporter.telemetryStats().deliveryBatches)
+            assertTrue(reporter.telemetryStats().payloadBytesSavedByCompression > 0)
+        }
+    }
+
+    @Test
+    fun `deep network timing phases serialize with a stable call id`() {
+        var now = 0L
+        val state = CallTimingState(callId = "logical-call", clock = { now })
+        state.dnsStart()
+        now += TimeUnit.MILLISECONDS.toNanos(5)
+        state.dnsEnd()
+        val address = InetSocketAddress("127.0.0.1", 443)
+        state.connectStart(address)
+        now += TimeUnit.MILLISECONDS.toNanos(10)
+        state.tlsStart()
+        now += TimeUnit.MILLISECONDS.toNanos(3)
+        state.tlsEnd()
+        now += TimeUnit.MILLISECONDS.toNanos(7)
+        state.connectEnd(address)
+        state.connectionAcquired()
+        state.requestStart()
+        now += TimeUnit.MILLISECONDS.toNanos(2)
+        state.requestHeadersEnd(hasBody = false)
+        now += TimeUnit.MILLISECONDS.toNanos(11)
+        state.responseHeadersStart()
+        state.responseBodyStart()
+        now += TimeUnit.MILLISECONDS.toNanos(9)
+        state.responseBodyEnd()
+
+        val json = testEvent(200).copy(sampleRate = 0.25, timingState = state).toJson()
+
+        assertTrue("\"callId\":\"logical-call\"" in json)
+        assertTrue("\"attemptNumber\":1" in json)
+        assertTrue("\"sampleRate\":0.25" in json)
+        assertTrue("\"dnsMs\":5" in json)
+        assertTrue("\"connectMs\":17" in json)
+        assertTrue("\"tlsMs\":3" in json)
+        assertTrue("\"requestWriteMs\":2" in json)
+        assertTrue("\"ttfbMs\":11" in json)
+        assertTrue("\"responseReadMs\":9" in json)
+        assertTrue("\"reusedConnection\":false" in json)
+    }
+
+    @Test
+    fun `event waits for call completion and is enqueued exactly once`() {
+        MockWebServer().use { server ->
+            server.start()
+            server.enqueue(MockResponse(code = 200, body = "{\"accepted\":1}"))
+            val delivered = CountDownLatch(1)
+            val reporter = EventReporter(
+                testConfig().copy(
+                    endpointUrl = server.url("/api/v1/events").toString(),
+                    batchSize = 1,
+                    flushIntervalMs = 30_000,
+                    responseTimingTimeoutMs = 30_000,
+                    gzipBatches = false,
+                    deliveryListener = { report ->
+                        if (report.status == ApiHealthDeliveryStatus.DELIVERED) delivered.countDown()
+                    },
+                ),
+            )
+            var now = 0L
+            val state = CallTimingState(callId = "completed-call", clock = { now })
+            state.responseBodyStart()
+            reporter.enqueueWhenCallCompletes(testEvent(200).copy(timingState = state), state)
+            assertEquals(0, reporter.telemetryStats().capturedEvents)
+
+            now += TimeUnit.MILLISECONDS.toNanos(14)
+            state.callEnd()
+            state.callEnd()
+
+            assertTrue(delivered.await(5, TimeUnit.SECONDS))
+            val body = server.takeRequest(5, TimeUnit.SECONDS)?.body?.utf8().orEmpty()
+            assertTrue("\"responseReadMs\":14" in body)
+            assertEquals(1, reporter.telemetryStats().capturedEvents)
+        }
+    }
+
+    @Test
+    fun `response timing timeout still delivers an unclosed call once`() {
+        MockWebServer().use { server ->
+            server.start()
+            server.enqueue(MockResponse(code = 200, body = "{\"accepted\":1}"))
+            val delivered = CountDownLatch(1)
+            val reporter = EventReporter(
+                testConfig().copy(
+                    endpointUrl = server.url("/api/v1/events").toString(),
+                    batchSize = 1,
+                    flushIntervalMs = 30_000,
+                    responseTimingTimeoutMs = 250,
+                    gzipBatches = false,
+                    deliveryListener = { report ->
+                        if (report.status == ApiHealthDeliveryStatus.DELIVERED) delivered.countDown()
+                    },
+                ),
+            )
+            val state = CallTimingState(callId = "unclosed-call")
+            reporter.enqueueWhenCallCompletes(testEvent(200).copy(timingState = state), state)
+
+            assertTrue(delivered.await(5, TimeUnit.SECONDS))
+            state.callEnd()
+            Thread.sleep(100)
+
+            assertEquals(1, reporter.telemetryStats().capturedEvents)
+            assertEquals(1, server.requestCount)
+        }
+    }
+
+    @Test
+    fun `offline spool restores newest events within its byte bound`() {
+        val directory = Files.createTempDirectory("api-health-spool").toFile()
+        try {
+            val queued = (200..204).map { status -> QueuedTelemetryEvent.live(testEvent(status)) }
+            val eventBytes = queued.first().toJson().toByteArray().size.toLong() + 1
+            val maxBytes = eventBytes * 2
+            val spool = OfflineEventSpool(directory, "spool-test", maxBytes)
+
+            spool.replace(queued)
+            val restored = spool.restore()
+
+            assertTrue(directory.listFiles().orEmpty().single().length() <= maxBytes)
+            assertEquals(2, restored.size)
+            assertEquals(queued.takeLast(2).map { it.eventId }, restored.map { it.eventId })
+        } finally {
+            directory.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun `adaptive sampling protects the bounded queue while preserving a floor`() {
+        val reporter = EventReporter(
+            testConfig().copy(
+                maxQueuedEvents = 100,
+                batchSize = 100,
+                flushIntervalMs = 30_000,
+                successSampleRate = 1.0,
+                minimumSuccessSampleRate = 0.05,
+                adaptiveSampling = true,
+            ),
+        )
+        repeat(60) { reporter.enqueue(testEvent(200)) }
+
+        assertEquals(0.5, reporter.effectiveSuccessSampleRate())
+        assertEquals(60, reporter.telemetryStats().capturedEvents)
     }
 
     private fun testEvent(statusCode: Int) = TelemetryEvent(

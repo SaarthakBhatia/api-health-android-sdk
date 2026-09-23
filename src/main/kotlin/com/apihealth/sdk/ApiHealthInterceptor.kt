@@ -13,11 +13,13 @@ import okhttp3.Response
 internal class ApiHealthInterceptor(
     private val config: ApiHealthConfig,
     private val reporter: EventReporter,
+    private val timingCollector: NetworkTimingCollector,
 ) : Interceptor {
 
     override fun intercept(chain: Interceptor.Chain): Response {
         val startedAt = System.nanoTime()
         val request = chain.request()
+        val timingState = timingCollector.timingFor(chain.call())
         val context = ApiHealth.contextFor(request, config)
         val response = try {
             chain.proceed(request)
@@ -31,28 +33,36 @@ internal class ApiHealthInterceptor(
                         occurredAt = isoTimestamp(),
                         config = config,
                         context = context,
+                        timingState = timingState,
                     )
-                }.onSuccess(reporter::enqueue)
+                }.onSuccess { event -> reporter.enqueueWhenCallCompletes(event, timingState) }
             }
             throw exception
         }
 
+        val durationMs = elapsedMillis(startedAt)
         val shouldCaptureError = config.captureHttpErrors && response.code in 400..599
-        val shouldCaptureSuccess = config.captureSuccessfulResponses &&
-            response.code in 200..399 &&
-            ThreadLocalRandom.current().nextDouble() < config.successSampleRate
+        val isSuccessfulResponse = config.captureSuccessfulResponses && response.code in 200..399
+        val isSlowResponse = config.alwaysCaptureSlowResponses && durationMs >= config.slowResponseThresholdMs
+        val effectiveSampleRate = if (isSlowResponse) 1.0 else reporter.effectiveSuccessSampleRate()
+        val shouldCaptureSuccess = isSuccessfulResponse &&
+            ThreadLocalRandom.current().nextDouble() < effectiveSampleRate
+
+        if (isSuccessfulResponse && !shouldCaptureSuccess) reporter.recordSampledOut()
 
         if (shouldCaptureError || shouldCaptureSuccess) {
             runCatching {
                 EventFactory.createHttpResponse(
                     request = request,
                     response = response,
-                    durationMs = elapsedMillis(startedAt),
+                    durationMs = durationMs,
                     occurredAt = isoTimestamp(),
                     config = config,
                     context = context,
+                    sampleRate = if (shouldCaptureError) 1.0 else effectiveSampleRate,
+                    timingState = timingState,
                 )
-            }.onSuccess(reporter::enqueue)
+            }.onSuccess { event -> reporter.enqueueWhenCallCompletes(event, timingState) }
         }
 
         return response

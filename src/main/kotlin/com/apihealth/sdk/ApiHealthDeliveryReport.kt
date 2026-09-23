@@ -12,4 +12,6 @@ data class ApiHealthDeliveryReport(
     val eventCount: Int,
     val pendingEventCount: Int,
     val message: String? = null,
+    val payloadBytes: Long = 0,
+    val uncompressedPayloadBytes: Long = 0,
 )

@@ -6,9 +6,10 @@ import java.util.concurrent.atomic.AtomicReference
 import okhttp3.Request
 
 object ApiHealth {
-    const val SDK_VERSION = "0.6.0"
+    const val SDK_VERSION = "0.7.0"
 
     private val reporters = ConcurrentHashMap<ReporterKey, EventReporter>()
+    private val reporterLock = Any()
     private val sharedContext = AtomicReference(ApiHealthEventContext())
     private val automaticSession = AutomaticSessionTracker()
 
@@ -23,8 +24,15 @@ object ApiHealth {
     ): OkHttpClient.Builder {
         if (okHttpBuilder.interceptors().any { it is ApiHealthInterceptor }) return okHttpBuilder
         val key = ReporterKey(config.endpointUrl, config.apiKey, config.appId, config.environment)
-        val reporter = reporters.computeIfAbsent(key) { EventReporter(config) }
-        return okHttpBuilder.addInterceptor(ApiHealthInterceptor(config, reporter))
+        val reporter = reporters[key] ?: synchronized(reporterLock) {
+            reporters[key] ?: EventReporter(config).also { reporters[key] = it }
+        }
+        // OkHttp exposes the configured factory on the built client, but not on Builder. Building a
+        // snapshot does not start threads or calls and lets us preserve the application's listener.
+        val applicationListenerFactory = okHttpBuilder.build().eventListenerFactory
+        val timingCollector = NetworkTimingCollector(applicationListenerFactory)
+        okHttpBuilder.eventListenerFactory(timingCollector)
+        return okHttpBuilder.addInterceptor(ApiHealthInterceptor(config, reporter, timingCollector))
     }
 
     /** Requests an immediate asynchronous upload of all currently buffered telemetry. */
@@ -37,6 +45,12 @@ object ApiHealth {
     @JvmStatic
     fun pendingEventCount(): Int = reporters.values.sumOf(EventReporter::pendingEventCount)
 
+    /** Process-local counters that quantify capture volume, sampling, drops, and upload bytes. */
+    @JvmStatic
+    fun telemetryStats(): ApiHealthTelemetryStats = reporters.values.fold(ApiHealthTelemetryStats()) {
+        total, reporter -> total + reporter.telemetryStats()
+    }
+
     /** Replaces shared context used by all subsequently completed requests. */
     @JvmStatic
     fun setContext(context: ApiHealthEventContext) {
@@ -46,7 +60,10 @@ object ApiHealth {
     /** Updates shared context atomically, useful when user, connectivity, or journey state changes. */
     @JvmStatic
     fun updateContext(transform: (ApiHealthEventContext) -> ApiHealthEventContext) {
-        sharedContext.updateAndGet(transform)
+        while (true) {
+            val current = sharedContext.get()
+            if (sharedContext.compareAndSet(current, transform(current))) return
+        }
     }
 
     @JvmStatic

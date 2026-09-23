@@ -22,7 +22,10 @@ internal object EventFactory {
         occurredAt: String,
         config: ApiHealthConfig,
         context: ApiHealthEventContext = ApiHealth.contextFor(request, config),
+        sampleRate: Double = 1.0,
+        timingState: CallTimingState? = null,
     ): TelemetryEvent {
+        val timing = timingState?.snapshot()
         val captureBodies = response.code >= 400 || config.captureSuccessfulBodies
         val requestBody = if (captureBodies) captureRequestBody(request, config) else CapturedBody(null, false)
         val responseBody = if (captureBodies) captureResponseBody(response, config) else CapturedBody(null, false)
@@ -55,10 +58,14 @@ internal object EventFactory {
             journeyStep = context.journeyStep,
             journeySequence = context.journeySequence,
             correlationId = context.correlationId,
+            callId = context.callId ?: timing?.callId,
+            attemptNumber = context.attemptNumber ?: timing?.attemptNumber,
             businessValue = context.businessValue,
             businessCurrency = context.businessCurrency,
             requestBodyTruncated = requestBody.truncated,
             responseBodyTruncated = responseBody.truncated,
+            sampleRate = sampleRate,
+            timingState = timingState,
         )
     }
 
@@ -69,7 +76,9 @@ internal object EventFactory {
         occurredAt: String,
         config: ApiHealthConfig,
         context: ApiHealthEventContext = ApiHealth.contextFor(request, config),
+        timingState: CallTimingState? = null,
     ): TelemetryEvent {
+        val timing = timingState?.snapshot()
         val requestBody = captureRequestBody(request, config)
         return TelemetryEvent(
             appId = config.appId,
@@ -100,10 +109,14 @@ internal object EventFactory {
             journeyStep = context.journeyStep,
             journeySequence = context.journeySequence,
             correlationId = context.correlationId,
+            callId = context.callId ?: timing?.callId,
+            attemptNumber = context.attemptNumber ?: timing?.attemptNumber,
             businessValue = context.businessValue,
             businessCurrency = context.businessCurrency,
             requestBodyTruncated = requestBody.truncated,
             responseBodyTruncated = false,
+            sampleRate = 1.0,
+            timingState = timingState,
         )
     }
 

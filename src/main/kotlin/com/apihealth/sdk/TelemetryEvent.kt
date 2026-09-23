@@ -39,12 +39,17 @@ internal data class TelemetryEvent(
     val journeyStep: String? = null,
     val journeySequence: Int? = null,
     val correlationId: String? = null,
+    val callId: String? = null,
+    val attemptNumber: Int? = null,
     val businessValue: BigDecimal? = null,
     val businessCurrency: String? = null,
     val requestBodyTruncated: Boolean,
     val responseBodyTruncated: Boolean,
+    val sampleRate: Double = 1.0,
+    val timingState: CallTimingState? = null,
 ) {
     fun toJson(): String = buildJsonObject {
+        val timing = timingState?.snapshot()
         put("eventId", eventId)
         put("appId", appId)
         put("environment", environment)
@@ -79,6 +84,18 @@ internal data class TelemetryEvent(
         businessCurrency?.let { put("businessCurrency", it) }
         put("requestBodyTruncated", requestBodyTruncated)
         put("responseBodyTruncated", responseBodyTruncated)
+        put("sampleRate", sampleRate)
+        (callId ?: timing?.callId)?.let { put("callId", it) }
+        (attemptNumber ?: timing?.attemptNumber)?.let { put("attemptNumber", it) }
+        timing?.let {
+            it.dnsMs?.let { value -> put("dnsMs", value) }
+            it.connectMs?.let { value -> put("connectMs", value) }
+            it.tlsMs?.let { value -> put("tlsMs", value) }
+            it.requestWriteMs?.let { value -> put("requestWriteMs", value) }
+            it.ttfbMs?.let { value -> put("ttfbMs", value) }
+            it.responseReadMs?.let { value -> put("responseReadMs", value) }
+            it.reusedConnection?.let { value -> put("reusedConnection", value) }
+        }
     }.toString()
 
     private fun Map<String, List<String>>.toJsonObject() = JsonObject(
