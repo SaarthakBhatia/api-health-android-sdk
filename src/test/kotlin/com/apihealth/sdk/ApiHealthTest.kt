@@ -33,7 +33,7 @@ class ApiHealthTest {
 
     @Test
     fun `public SDK version matches the Maven release`() {
-        assertEquals("0.7.0", ApiHealth.SDK_VERSION)
+        assertEquals("0.7.1", ApiHealth.SDK_VERSION)
     }
 
     @Test

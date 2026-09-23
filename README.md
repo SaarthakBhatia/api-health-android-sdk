@@ -28,7 +28,7 @@ Add the SDK to the application module:
 
 ```kotlin
 dependencies {
-    implementation("com.github.SaarthakBhatia:api-health-android-sdk:0.7.0")
+    implementation("com.github.SaarthakBhatia:api-health-android-sdk:0.7.1")
 }
 ```
 
@@ -40,7 +40,7 @@ From this repository:
 .\mvnw.cmd install
 ```
 
-Add `mavenLocal()` to the Android repositories and use `com.apihealth:api-health-android:0.7.0` while testing unpublished changes.
+Add `mavenLocal()` to the Android repositories and use `com.apihealth:api-health-android:0.7.1` while testing unpublished changes.
 
 ## Retrofit integration
 
@@ -88,7 +88,7 @@ val retrofit = Retrofit.Builder()
 
 HTTP `4xx`/`5xx` responses and timeout, DNS, SSL, connection, cancellation, and other I/O failures are reported by default. Successful `2xx`/`3xx` reporting is opt-in. Use `successSampleRate = 1.0` when every call must appear, or lower it deliberately to control high-volume storage.
 
-Version 0.7.0 captures the configured device manufacturer alongside its model and automatically gives every captured event a random opaque session ID. The ID rotates after 30 minutes without captured activity, or immediately when `ApiHealth.startNewSession()` is called. This enables affected-session counts and captured request timelines without a login, user ID, manual journey calls, or another network request. Automatically inferred request sequences are not presented as user funnels; named chronological step-reach and drop-off metrics require explicit journey instrumentation. Set `automaticSessionTracking = false` only if your application supplies its own random, non-personal session ID.
+Version 0.7.1 captures the configured device manufacturer alongside its model and automatically gives every captured event a random opaque session ID. The ID rotates after 30 minutes without captured activity, or immediately when `ApiHealth.startNewSession()` is called. This enables affected-session counts and captured request timelines without a login, user ID, manual journey calls, or another network request. Automatically inferred request sequences are not presented as user funnels; named chronological step-reach and drop-off metrics require explicit journey instrumentation. Set `automaticSessionTracking = false` only if your application supplies its own random, non-personal session ID.
 
 The SDK batches up to 20 events into one request, gzip-compresses worthwhile payloads, retries transient `408`, `429`, and `5xx` failures with bounded exponential backoff, and assigns every event an idempotency ID so a retry cannot create a duplicate. A shared reporter services multiple monitored OkHttp clients without creating a delivery thread per client. The default queue holds 2,000 events and flushes every 1.5 seconds. Errors are prioritized over sampled successes if that queue fills. `maxBatchBytes` prevents a group of large captured bodies from creating an oversized upload (a single large event is still sent alone).
 
@@ -112,7 +112,7 @@ Spool reads and writes run on the SDK delivery thread and never block API calls.
 
 ### Deep network timings
 
-Version 0.7.0 composes with an OkHttp `EventListener` configured before `ApiHealth.install(...)` and records DNS, TCP connection, TLS, request-write, time-to-first-byte, and response-read durations. It also reports whether OkHttp reused a pooled connection, a stable call ID, and the number of connection attempts. Missing means a phase did not run; zero is a valid sub-millisecond measurement.
+Version 0.7.1 composes with an OkHttp `EventListener` configured before `ApiHealth.install(...)` and records DNS, TCP connection, TLS, request-write, time-to-first-byte, and response-read durations. It also reports whether OkHttp reused a pooled connection, a stable call ID, and the number of connection attempts. Missing means a phase did not run; zero is a valid sub-millisecond measurement.
 
 `durationMs` remains request start through response headers for HTTP responses. The SDK waits for OkHttp call completion so `responseReadMs` reflects body consumption. `responseTimingTimeoutMs` defaults to five seconds and provides an exactly-once fallback for streaming or unclosed bodies; fallback events omit an unfinished response-read value rather than blocking delivery.
 
@@ -189,7 +189,7 @@ The Maven version in `pom.xml` and `ApiHealth.SDK_VERSION` must match. To publis
 1. Update both versions and the SCM tag in `pom.xml`.
 2. Run `.\mvnw.cmd verify` from the repository root.
 3. Commit and push the changes.
-4. Push a matching tag such as `0.7.0`.
-5. Open `https://jitpack.io/#SaarthakBhatia/api-health-android-sdk/0.7.0` to trigger and verify the build.
+4. Push a matching tag such as `0.7.1`.
+5. Open `https://jitpack.io/#SaarthakBhatia/api-health-android-sdk/0.7.1` to trigger and verify the build.
 
 GitHub Actions tests every push and pull request. JitPack publishes the tagged build on demand.
