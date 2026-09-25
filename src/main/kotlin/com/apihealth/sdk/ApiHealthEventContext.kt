@@ -18,6 +18,8 @@ data class ApiHealthEventContext(
     val attemptNumber: Int? = null,
     val businessValue: BigDecimal? = null,
     val businessCurrency: String? = null,
+    val featureName: String? = null,
+    val screenName: String? = null,
 ) {
     init {
         require(journeySequence == null || journeySequence >= 0) { "journeySequence must not be negative" }
@@ -38,6 +40,8 @@ data class ApiHealthEventContext(
         carrier = override.carrier ?: carrier,
         countryCode = override.countryCode ?: countryCode,
         browser = override.browser ?: browser,
+        featureName = override.featureName ?: featureName,
+        screenName = override.screenName ?: screenName,
         journeyName = override.journeyName ?: journeyName,
         journeyStep = override.journeyStep ?: journeyStep,
         journeySequence = override.journeySequence ?: journeySequence,

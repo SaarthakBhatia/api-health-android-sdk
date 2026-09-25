@@ -6,7 +6,7 @@ import java.util.concurrent.atomic.AtomicReference
 import okhttp3.Request
 
 object ApiHealth {
-    const val SDK_VERSION = "0.7.1"
+    const val SDK_VERSION = "0.8.0"
 
     private val reporters = ConcurrentHashMap<ReporterKey, EventReporter>()
     private val reporterLock = Any()
@@ -57,7 +57,7 @@ object ApiHealth {
         sharedContext.set(context)
     }
 
-    /** Updates shared context atomically, useful when user, connectivity, or journey state changes. */
+    /** Updates shared context atomically, useful when connectivity, screen, or journey state changes. */
     @JvmStatic
     fun updateContext(transform: (ApiHealthEventContext) -> ApiHealthEventContext) {
         while (true) {

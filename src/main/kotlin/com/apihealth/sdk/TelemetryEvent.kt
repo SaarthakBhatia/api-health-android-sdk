@@ -35,6 +35,8 @@ internal data class TelemetryEvent(
     val carrier: String? = null,
     val countryCode: String? = null,
     val browser: String? = null,
+    val featureName: String? = null,
+    val screenName: String? = null,
     val journeyName: String? = null,
     val journeyStep: String? = null,
     val journeySequence: Int? = null,
@@ -76,6 +78,8 @@ internal data class TelemetryEvent(
         carrier?.let { put("carrier", it) }
         countryCode?.let { put("countryCode", it) }
         browser?.let { put("browser", it) }
+        featureName?.uploadLabel(100)?.let { put("featureName", it) }
+        screenName?.uploadLabel(120)?.let { put("screenName", it) }
         journeyName?.let { put("journeyName", it) }
         journeyStep?.let { put("journeyStep", it) }
         journeySequence?.let { put("journeySequence", it) }
@@ -101,4 +105,12 @@ internal data class TelemetryEvent(
     private fun Map<String, List<String>>.toJsonObject() = JsonObject(
         mapValues { (_, values) -> JsonArray(values.map(::JsonPrimitive)) },
     )
+
+    private fun String.uploadLabel(maxLength: Int): String? {
+        val normalized = trim()
+        if (normalized.isEmpty()) return null
+        val prefix = if (normalized.length > maxLength) normalized.substring(0, maxLength) else normalized
+        val bounded = if (prefix.last().isHighSurrogate()) prefix.dropLast(1) else prefix
+        return bounded.takeIf { it.isNotBlank() && it.none(Character::isISOControl) }
+    }
 }

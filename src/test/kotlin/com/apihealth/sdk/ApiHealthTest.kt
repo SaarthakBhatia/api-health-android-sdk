@@ -14,6 +14,9 @@ import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.zip.GZIPInputStream
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertFailsWith
@@ -33,7 +36,7 @@ class ApiHealthTest {
 
     @Test
     fun `public SDK version matches the Maven release`() {
-        assertEquals("0.7.1", ApiHealth.SDK_VERSION)
+        assertEquals("0.8.0", ApiHealth.SDK_VERSION)
     }
 
     @Test
@@ -222,6 +225,75 @@ class ApiHealthTest {
         } finally {
             ApiHealth.clearContext()
         }
+    }
+
+    @Test
+    fun `feature and screen labels follow context precedence for HTTP and network events`() {
+        ApiHealth.setContext(ApiHealthEventContext(featureName = "Checkout", screenName = "Cart"))
+        try {
+            ApiHealth.updateContext { it.copy(screenName = "Payment") }
+            val config = testConfig().copy(
+                initialContext = ApiHealthEventContext(featureName = "Default", screenName = "Home"),
+                contextProvider = { ApiHealthEventContext(featureName = "Subscriptions") },
+            )
+            val untagged = Request.Builder().url("https://service.example/checkout").build()
+            val shared = ApiHealth.contextFor(untagged, config)
+            assertEquals("Subscriptions", shared.featureName)
+            assertEquals("Payment", shared.screenName)
+
+            val tagged = ApiHealth.tag(
+                untagged.newBuilder(),
+                ApiHealthEventContext(featureName = "Order review", screenName = "Payment sheet"),
+            ).build()
+            val response = Response.Builder()
+                .request(tagged)
+                .protocol(Protocol.HTTP_1_1)
+                .code(503)
+                .message("Unavailable")
+                .build()
+            val httpEvent = EventFactory.createHttpResponse(
+                request = tagged,
+                response = response,
+                durationMs = 901,
+                occurredAt = "2026-09-25T12:00:00.000Z",
+                config = config,
+            )
+            val networkEvent = EventFactory.createNetworkFailure(
+                request = tagged,
+                exception = ConnectException("offline"),
+                durationMs = 901,
+                occurredAt = "2026-09-25T12:00:00.000Z",
+                config = config,
+            )
+
+            for (event in listOf(httpEvent, networkEvent)) {
+                val json = Json.parseToJsonElement(event.toJson()).jsonObject
+                assertEquals("Order review", json["featureName"]?.jsonPrimitive?.content)
+                assertEquals("Payment sheet", json["screenName"]?.jsonPrimitive?.content)
+            }
+        } finally {
+            ApiHealth.clearContext()
+        }
+    }
+
+    @Test
+    fun `feature and screen labels are optional and bounded in outbound JSON`() {
+        val empty = Json.parseToJsonElement(testEvent(200).toJson()).jsonObject
+        assertNull(empty["featureName"])
+        assertNull(empty["screenName"])
+
+        val longLabels = testEvent(200).copy(
+            featureName = "F".repeat(101),
+            screenName = "S".repeat(119) + "\uD83D\uDE00",
+        )
+        val json = Json.parseToJsonElement(longLabels.toJson()).jsonObject
+        assertEquals("F".repeat(100), json["featureName"]?.jsonPrimitive?.content)
+        assertEquals("S".repeat(119), json["screenName"]?.jsonPrimitive?.content)
+
+        val invalidLabels = testEvent(200).copy(featureName = "  ", screenName = "Payment\nSheet")
+        val invalidJson = Json.parseToJsonElement(invalidLabels.toJson()).jsonObject
+        assertNull(invalidJson["featureName"])
+        assertNull(invalidJson["screenName"])
     }
 
     @Test

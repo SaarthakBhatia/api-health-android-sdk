@@ -6,7 +6,7 @@
 
     <groupId>com.apihealth</groupId>
     <artifactId>api-health-android</artifactId>
-    <version>0.7.1</version>
+    <version>0.8.0</version>
     <name>API Health Android SDK</name>
     <description>OkHttp telemetry for Android Retrofit HTTP responses and network failures.</description>
     <url>https://github.com/SaarthakBhatia/api-health-android-sdk</url>
@@ -15,7 +15,7 @@
         <connection>scm:git:https://github.com/SaarthakBhatia/api-health-android-sdk.git</connection>
         <developerConnection>scm:git:ssh://git@github.com/SaarthakBhatia/api-health-android-sdk.git</developerConnection>
         <url>https://github.com/SaarthakBhatia/api-health-android-sdk</url>
-        <tag>0.7.1</tag>
+        <tag>0.8.0</tag>
     </scm>
 
     <properties>
